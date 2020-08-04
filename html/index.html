@@ -30,7 +30,6 @@
   <script src="embind.js"></script>
 
 	<script>
-   Module.onRuntimeInitialized = _ =>{
 		if (!Detector.webgl) Detector.addGetWebGLMessage();
 
 		let input = document.getElementById("fileInput");
@@ -107,9 +106,6 @@
 			"Show Wireframe": showWireframe
 		};
 
-		init();
-		animate();
-
 		function init() {
 			let container = document.createElement("div");
 			document.body.appendChild(container);
@@ -150,13 +146,17 @@
 		}
 
 		window.onload = function() {
+                    console.log("adding event listener");
 			input.addEventListener("change", function(e) {
+                                console.log("picked new file");
 				let file = input.files[0];
 				filename = file.name;
 
 				if (filename.endsWith(".obj")) {
+          console.log("reading obj file");
 					let reader = new FileReader();
-					reader.onload = function(e) {
+					  reader.onload = function(e) {
+            console.log("read input file");
 						initMesh(reader.result);
 					}
 
@@ -499,7 +499,12 @@
 				renderer.render(uvScene, uvCamera);
 			}
 		}
+          // Initialize only after wasm is loaded
+   Module.onRuntimeInitialized = _ =>{ 
+		init();
+		animate();
    };
+
 	</script>
 </body>
 
