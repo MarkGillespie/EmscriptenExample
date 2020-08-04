@@ -155,8 +155,10 @@
 				filename = file.name;
 
 				if (filename.endsWith(".obj")) {
+          console.log("reading obj file");
 					let reader = new FileReader();
-					reader.onload = function(e) {
+					  reader.onload = function(e) {
+            console.log("read input file");
 						initMesh(reader.result);
 					}
 
