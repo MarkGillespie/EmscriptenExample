@@ -23,3 +23,5 @@ emmake make -j7
 This creates two "binaries", `bin/embind.js` and `bin/embind.wasm`. Then, you should copy these files into the `html` directory.
 
 Because of some browser stuff, these `embind` files need to be served from a server - the page doesn't work if you just open the file locally.
+
+Note that I had to include Eigen as an explicit dependency. Emscripten didn't like geometry-central's fancy on-the-fly Eigen downloader. But if you just include Eigen as a dependency everything works fine.
