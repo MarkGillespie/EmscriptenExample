@@ -1,0 +1,9 @@
+[submodule "deps/geometrycentral"]
+	path = deps/geometrycentral
+	url = git@github.com:nmwsharp/geometrycentral
+[submodule "deps/eigen-git-mirror"]
+	path = deps/eigen-git-mirror
+	url = git@github.com:eigenteam/eigen-git-mirror.git
+[submodule "html/geometry-processing-js"]
+	path = html/geometry-processing-js
+	url = git@github.com:GeometryCollective/geometry-processing-js

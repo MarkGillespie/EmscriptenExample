@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>Parameterization</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link rel="stylesheet" href="geometry-processing-js/style/main.css">
+</head>
+
+<body>
+	<div id="info">
+		<input type="file" id="fileInput" style="visibility:hidden">
+	</div>
+	<div id="info">
+		<h2>Parameterization</h2>
+		<div id="meta">Loading...</div>
+	</div>
+	<div id="logo">
+		<a href="https://geometrycollective.github.io/geometry-processing-js/" target="_blank">
+			<img src="geometry-processing-js/imgs/logo.png" width="80" height="80" border="0">
+		</a>
+	</div>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/87/three.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.5/dat.gui.min.js"></script>
+	<script src="geometry-processing-js/libs/detector.js"></script>
+	<script src="geometry-processing-js/libs/trackball-controls.js"></script>
+	<script src="geometry-processing-js/input/face.js"></script>
+	<script src="geometry-processing-js/utils/meshio.js"></script>
+  <script src="embind.js"></script>
+
+	<script>
+   Module.onRuntimeInitialized = _ =>{
+		if (!Detector.webgl) Detector.addGetWebGLMessage();
+
+		let input = document.getElementById("fileInput");
+		let renderer = undefined;
+		let camera = undefined;
+		let uvCamera = undefined;
+		let controls = undefined;
+		let shiftClick = false;
+		let showWireframe = false;
+		let scene = undefined;
+		let threeMesh = undefined;
+		let threeGeometry = undefined;
+		let wireframe = undefined;
+		let uvScene = undefined;
+		let threeUvMesh = undefined;
+		let threeUvGeometry = undefined;
+		let uvWireframe = undefined;
+		let checkerboard = undefined;
+		let selectedVertex = undefined;
+		let materialSettings = {
+			vertexColors: THREE.VertexColors,
+			polygonOffset: true,
+			polygonOffsetFactor: 1,
+			polygonOffsetUnits: 1,
+			side: THREE.DoubleSide
+		};
+
+		let positions = undefined;
+		let uvs = undefined;
+		let normals = undefined;
+		let colors = undefined;
+		let uvColors = undefined;
+		let indices = undefined;
+
+    let flattening = undefined;
+    let meshFile = undefined;
+    let parameterizedSoup = undefined;
+
+		let filename = "face.obj";
+
+		const ORANGE = new THREE.Vector3(1.0, 0.5, 0.0);
+		let guiFields = {
+			"Load Mesh": function() {
+				input.click();
+			},
+			"Export Mesh": function() {
+				exportFile(MeshIO.writeOBJ({
+					"v": positions,
+					"vt": uvs,
+					"vn": normals,
+					"f": indices
+				}));
+			},
+			"Method": "SCP",
+			"Plot": "Shaded",
+			"Angle": "90.0",
+			"Target Boundary": "Automatic",
+			"Flatten": function() {
+				// flatten
+				flatten();
+        flattening = true;
+
+				if (flattening) {
+					// update uvs, colors, and camera aspect ratio
+					updateUVs();
+					updateUvColors(this.Plot);
+					camera.aspect = 0.5 * window.innerWidth / window.innerHeight;
+					camera.updateProjectionMatrix();
+				}
+			},
+			"Reset": function() {
+				selectedVertex = undefined;
+			},
+			"Show Wireframe": showWireframe
+		};
+
+		init();
+		animate();
+
+		function init() {
+			let container = document.createElement("div");
+			document.body.appendChild(container);
+
+			initRenderer(container);
+			initGUI();
+			initCamera();
+			initScene();
+			initLights();
+			initMesh(face);
+			initControls();
+			addEventListeners();
+		}
+
+		function initRenderer(container) {
+			renderer = new THREE.WebGLRenderer({
+				antialias: true
+			});
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setClearColor(0xffffff, 1.0);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			container.appendChild(renderer.domElement);
+		}
+
+		function initGUI() {
+			let gui = new dat.GUI();
+
+			let io = gui.addFolder("IO");
+			io.add(guiFields, "Load Mesh");
+			io.add(guiFields, "Export Mesh");
+			io.close();
+
+			gui.add(guiFields, "Method", ["SCP"]);
+			gui.add(guiFields, "Plot", ["Shaded", "Conformal Error", "Area Scaling"]).onChange(updateUvColors).listen();
+
+			gui.add(guiFields, "Flatten");
+			gui.add(guiFields, "Show Wireframe").onChange(toggleWireframe).listen();
+		}
+
+		window.onload = function() {
+			input.addEventListener("change", function(e) {
+				let file = input.files[0];
+				filename = file.name;
+
+				if (filename.endsWith(".obj")) {
+					let reader = new FileReader();
+					reader.onload = function(e) {
+						initMesh(reader.result);
+					}
+
+					reader.onerror = function(e) {
+						alert("Unable to load OBJ file");
+					}
+
+					reader.readAsText(file);
+
+				} else {
+					alert("Please load an OBJ file");
+				}
+			});
+		}
+
+		function exportFile(text) {
+			let element = document.createElement("a");
+			element.setAttribute("href", "data:text/plain;charset=utf-8," + encodeURIComponent(text));
+			element.setAttribute("download", filename);
+
+			element.style.display = "none";
+			document.body.appendChild(element);
+
+			element.click();
+
+			document.body.removeChild(element);
+		}
+
+		function flatten() {
+			  parameterizedSoup = Module.scp(meshFile, "obj");
+        updateUVs();
+		}
+
+		function updateDisplayText() {
+			let element = document.getElementById("meta");
+      element.textContent = "";
+		}
+
+    function updateUVs() {
+      let faces = parameterizedSoup.polygons();
+      let faceCoords = parameterizedSoup.textureCoordinates();
+			let F = faces.size();
+      for (let iF = 0; iF < F; iF++) {
+          // TODO: handle non-triangular face
+          let face = faces.get(iF);
+          let coords = faceCoords.get(iF);
+			    for (let iV = 0; iV < 3; iV++) {
+              let i = face.get(iV);
+              let uv = coords.get(iV);
+			        uvs[3 * i + 0] = 2 * uv[0];
+			        uvs[3 * i + 1] = 2 * uv[1];
+			        uvs[3 * i + 2] = 0;
+			    }
+			}
+
+			threeGeometry.attributes.uv.needsUpdate = true;
+			wireframe.geometry = new THREE.WireframeGeometry(threeGeometry);
+
+			threeUvGeometry.attributes.position.needsUpdate = true;
+			threeUvGeometry.attributes.uv.needsUpdate = true;
+			uvWireframe.geometry = new THREE.WireframeGeometry(threeUvGeometry);
+
+			if (threeMesh.material.map === null) {
+				threeMesh.material.map = checkerboard;
+				threeMesh.material.needsUpdate = true;
+			}
+		}
+
+		function updateUvColors(value) {
+			if (flattening) {
+			  if (value === "Shaded") {
+	        // fill position, normal and color buffers
+					for (let iV = 0; iV < uvColors.length; iV += 3) {
+						uvColors[iV + 0] = ORANGE.x;
+						uvColors[iV + 1] = ORANGE.y;
+						uvColors[iV + 2] = ORANGE.z;
+					}
+
+					if (threeUvMesh.material.isMeshBasicMaterial) {
+						threeUvMesh.material = new THREE.MeshPhongMaterial(materialSettings);
+					}
+
+					if (threeUvMesh.material.map === null) {
+						threeUvMesh.material.map = checkerboard;
+						threeUvMesh.material.needsUpdate = true;
+					}
+
+				} else {
+					if (value === "Conformal Error") {
+						Distortion.computeQuasiConformalError(uvColors, flattening, geometry);
+
+					} else if (value === "Area Scaling") {
+						Distortion.computeAreaScaling(uvColors, flattening, geometry);
+					}
+
+					if (threeUvMesh.material.isMeshPhongMaterial) {
+						threeUvMesh.material = new THREE.MeshBasicMaterial(materialSettings);
+					}
+				}
+
+				threeUvGeometry.attributes.color.needsUpdate = true;
+			}
+		}
+
+		function toggleWireframe(checked) {
+			showWireframe = checked;
+			if (showWireframe) {
+				threeMesh.add(wireframe);
+				threeUvMesh.add(uvWireframe);
+
+			} else {
+				threeMesh.remove(wireframe);
+				threeUvMesh.remove(uvWireframe);
+			}
+		}
+
+		function initCamera() {
+			const fov = 45.0;
+			const aspect = window.innerWidth / window.innerHeight;
+			const near = 0.01;
+			const far = 1000;
+			const eyeZ = 3.5;
+
+			camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+			camera.position.z = eyeZ;
+
+			uvCamera = new THREE.PerspectiveCamera(fov, 0.5 * aspect, near, far);
+			uvCamera.position.z = eyeZ;
+		}
+
+		function initScene() {
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color(0xffffff);
+
+			uvScene = new THREE.Scene();
+			uvScene.background = new THREE.Color(0xffffff);
+		}
+
+		function initLights() {
+			let ambient = new THREE.AmbientLight(0xffffff, 0.35);
+			camera.add(ambient);
+
+			let point = new THREE.PointLight(0xffffff);
+			point.position.set(2, 20, 15);
+			camera.add(point);
+
+			let uvAmbient = new THREE.AmbientLight(0xffffff, 0.35);
+			uvCamera.add(uvAmbient);
+
+			let uvPoint = new THREE.PointLight(0xffffff);
+			uvPoint.position.set(20, 20, 15);
+			uvCamera.add(uvPoint);
+
+			scene.add(camera);
+			uvScene.add(uvCamera);
+		}
+
+    function initMesh(text) {
+      meshFile = text;
+			parameterizedSoup = Module.readMesh(meshFile, "obj");
+
+			// remove any previously loaded mesh from scene
+			scene.remove(threeMesh);
+			uvScene.remove(threeUvMesh);
+			targetCurvatures = undefined;
+
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+			flattening = undefined;
+
+			// create THREE.js mesh (and geometry) objects
+			initThreeMesh();
+			scene.add(threeMesh);
+
+			initThreeUvMesh();
+			uvScene.add(threeUvMesh);
+
+			guiFields["Reset"]();
+
+			// toggle wireframe
+			toggleWireframe(showWireframe);
+
+			// update metadata
+			updateDisplayText();
+		}
+
+		function initThreeMesh() {
+			// create geometry object
+			threeGeometry = new THREE.BufferGeometry();
+
+      let coords = parameterizedSoup.vertexCoordinates();
+
+			// fill position, normal and color buffers
+			let V = coords.size();
+			positions = new Float32Array(V * 3);
+			uvs = new Float32Array(V * 3);
+			normals = new Float32Array(V * 3);
+			colors = new Float32Array(V * 3);
+			for (let i = 0; i < V; i++) {
+				let position = coords.get(i);
+				positions[3 * i + 0] = position[0];
+				positions[3 * i + 1] = position[1];
+				positions[3 * i + 2] = position[2];
+
+				colors[3 * i + 0] = ORANGE.x;
+				colors[3 * i + 1] = ORANGE.y;
+				colors[3 * i + 2] = ORANGE.z;
+			}
+
+			// fill index buffer
+      let faces = parameterizedSoup.polygons();
+			let F = faces.size();
+			indices = new Uint32Array(F * 3);
+      for (let iF = 0; iF < F; iF++) {
+        // TODO: handle non-triangular face
+        let face = faces.get(iF);
+				for (let iV = 0; iV < 3; iV++) {
+					indices[3 * iF + iV] = face.get(iV);
+				}
+			}
+
+			// set geometry
+			threeGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+			threeGeometry.addAttribute("position", new THREE.BufferAttribute(positions, 3));
+			threeGeometry.addAttribute("uv", new THREE.BufferAttribute(uvs, 3));
+			threeGeometry.addAttribute("color", new THREE.BufferAttribute(colors, 3));
+      threeGeometry.computeVertexNormals();
+
+			// create checkerboard
+			const textureHeight = 64;
+			const textureWidth = 64;
+			let checkData = new Uint8Array(textureHeight * textureWidth * 3);
+			for (let i = 0; i < textureHeight; i++) {
+				for (let j = 0; j < textureWidth; j++) {
+					let c = (((i & 0x8) === 0) ^ ((j & 0x8) === 0)) * 255;
+					if (c === 0) c = 155;
+					checkData[3 * (textureWidth * i + j) + 0] = c;
+					checkData[3 * (textureWidth * i + j) + 1] = c;
+					checkData[3 * (textureWidth * i + j) + 2] = c;
+				}
+			}
+			checkerboard = new THREE.DataTexture(checkData, textureHeight, textureWidth, THREE.RGBFormat);
+			checkerboard.wrapS = THREE.RepeatWrapping;
+			checkerboard.wrapT = THREE.RepeatWrapping;
+			checkerboard.generateMipmaps = true;
+			checkerboard.needsUpdate = true;
+
+			// create material
+			let threeMaterial = new THREE.MeshPhongMaterial(materialSettings);
+
+			// create wireframe
+			wireframe = new THREE.LineSegments();
+			wireframe.geometry = new THREE.WireframeGeometry(threeGeometry);
+			wireframe.material = new THREE.LineBasicMaterial({
+				color: 0x000000,
+				linewidth: 0.75
+			});
+
+			// create mesh
+			threeMesh = new THREE.Mesh(threeGeometry, threeMaterial);
+		}
+
+		function initThreeUvMesh() {
+			// create geometry object
+			threeUvGeometry = new THREE.BufferGeometry();
+
+
+      let coords = parameterizedSoup.vertexCoordinates();
+
+			// allocate color buffer
+			let V = coords.size();
+			uvColors = new Float32Array(V * 3);
+
+			// set geometry
+			threeUvGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+			threeUvGeometry.addAttribute("position", new THREE.BufferAttribute(uvs, 3));
+			threeUvGeometry.addAttribute("uv", new THREE.BufferAttribute(uvs, 3));
+			threeUvGeometry.addAttribute("normal", threeGeometry.getAttribute("normal"));
+      threeUvGeometry.addAttribute("color", new THREE.BufferAttribute(uvColors, 3));
+
+			// create material
+			let threeUvMaterial = new THREE.MeshPhongMaterial(materialSettings);
+
+			// create wireframe
+			uvWireframe = new THREE.LineSegments();
+			uvWireframe.geometry = new THREE.WireframeGeometry(threeUvGeometry);
+			uvWireframe.material = new THREE.LineBasicMaterial({
+				color: 0x000000,
+				linewidth: 0.75
+			});
+
+			// create mesh
+			threeUvMesh = new THREE.Mesh(threeUvGeometry, threeUvMaterial);
+			threeUvMesh.translateX(-0.4);
+		}
+
+		function initControls() {
+			controls = new THREE.TrackballControls(camera, renderer.domElement);
+			controls.rotateSpeed = 5.0;
+		}
+
+		function addEventListeners() {
+			window.addEventListener("resize", onWindowResize, false);
+		}
+
+		function onWindowResize() {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			if (flattening) camera.aspect *= 0.5;
+			camera.updateProjectionMatrix();
+
+			uvCamera.aspect = 0.5 * window.innerWidth / window.innerHeight;
+			uvCamera.updateProjectionMatrix();
+
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			controls.handleResize();
+			render();
+		}
+
+		function animate() {
+			requestAnimationFrame(animate);
+			controls.update();
+			render();
+		}
+
+		function render() {
+			// set viewport and render mesh
+			let width = window.innerWidth;
+			if (flattening) width = Math.floor(width * 0.5);
+
+			renderer.setViewport(0.0, 0.0, width, window.innerHeight);
+			renderer.setScissor(0.0, 0.0, width, window.innerHeight);
+			renderer.setScissorTest(true);
+			renderer.render(scene, camera);
+
+			// set viewport and render flattening
+			if (flattening) {
+				renderer.setViewport(width, 0.0, width, window.innerHeight);
+				renderer.setScissor(width, 0.0, width, window.innerHeight);
+				renderer.setScissorTest(true);
+				renderer.render(uvScene, uvCamera);
+			}
+		}
+   };
+	</script>
+</body>
+
+</html>
