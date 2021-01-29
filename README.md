@@ -17,7 +17,7 @@ Once you have Emscripten, then building this code is just like building an ordin
 ```bash
 mkdir build
 cd build
-emcmake cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=emcc ..
+emcmake cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=emcc -DCMAKE_CXX_COMPILER=em++ ..
 emmake make -j7
 ```
 This creates two "binaries", `bin/embind.js` and `bin/embind.wasm`. Then, you should copy these files into the `html` directory.
